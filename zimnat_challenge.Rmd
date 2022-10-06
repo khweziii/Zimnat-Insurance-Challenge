@@ -1,0 +1,839 @@
+---
+title: "Zindi Challenge - Insurance Recommendation"
+date:  "`r format(Sys.time(), '%Y-%m-%d')`"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+---
+
+```{css, include=FALSE}
+.action {
+  # margin: 2em;
+  padding: 2em;
+  border: 1px solid grey;
+  border-radius: 5px;
+  background: #eeeeee;
+}
+
+```
+
+link to challenge: <https://zindi.africa/competitions/zimnat-insurance-recommendation-challenge/data>
+
+Outline:
+
+1.  Pre-processing
+2.  Exploratory Data Analysis
+3.  Training and Validation
+4.  Final Prediction
+
+```{r message=FALSE, warning=FALSE}
+## load packages & reading in data
+library(tidyverse)
+library(tidytuesdayR)
+library(scales)
+library(lubridate)
+library(stringr)
+library(ISLR2)
+theme_set(theme_light())
+```
+
+# Loading data (Training & Test data)
+
+```{r, Pre-processing}
+
+# Read in the training data
+
+direc = "C:/Users/Khwezi/Documents/Docu/Zindi challenges/Zimnat Insurance/data/"
+
+fname = "Train.csv"
+
+ftest = "Test.csv"
+
+fpath = paste0(direc, fname)
+
+fpathtest = paste0(direc, ftest)
+
+train = read.csv(fpath, sep = ",")
+
+test = read.csv(fpathtest, sep = ",")
+```
+
+# Selecting features (train data)
+
+```{r, Selecting features train}
+
+# Selecting relevant features (excluding occupation category) train
+
+naive_train = train[,-c(1,8)]
+
+naive_train %>% head()
+
+
+```
+
+# Selecting features (test data)
+
+```{r, Selecting features test}
+
+# Selecting relevant features (excluding occupation category)
+
+test_ids = test$ID
+
+naive_test = test[,-c(1,8)]
+
+naive_test %>% head()
+
+```
+
+# Dealing with dates (train data)
+
+```{r, dealing with dates train}
+
+# Dealing with the dates
+naive_train$join_date = naive_train$join_date %>% dmy()
+
+# Extracting issue dates and forming new columns
+naive_train$JoinDay = naive_train$join_date %>% day()
+
+naive_train$JoinMonth = naive_train$join_date %>% month()
+
+naive_train$JoinYear = naive_train$join_date %>% year()
+
+naive_train = naive_train[,-1]
+
+naive_train %>% head()
+```
+
+# Dealing with dates (test data)
+
+```{r, dealing with dates test}
+
+# Dealing with the dates
+naive_test$join_date = naive_test$join_date %>% dmy()
+
+# Extracting issue dates and forming new columns
+naive_test$JoinDay = naive_test$join_date %>% day()
+
+naive_test$JoinMonth = naive_test$join_date %>% month()
+
+naive_test$JoinYear = naive_test$join_date %>% year()
+
+naive_test = naive_test[,-1]
+
+naive_test %>% head()
+```
+
+# Encoding the remaining variables into numeric values (train data)
+
+```{r}
+naive_train$branch_code = naive_train$branch_code %>% as.factor() %>% as.numeric()
+
+naive_train$sex = naive_train$sex %>% as.factor() %>% as.numeric()
+
+naive_train$marital_status = naive_train$marital_status %>% as.factor() %>% as.numeric()
+
+naive_train$occupation_code = naive_train$occupation_code %>% as.factor() %>% as.numeric()
+
+naive_train %>% head()
+```
+
+# Encoding the remaining variables into numeric values (test data)
+
+```{r}
+naive_test$branch_code = naive_test$branch_code %>% as.factor() %>% as.numeric()
+
+naive_test$sex = naive_test$sex %>% as.factor() %>% as.numeric()
+
+naive_test$marital_status = naive_test$marital_status %>% as.factor() %>% as.numeric()
+
+naive_test$occupation_code = naive_test$occupation_code %>% as.factor() %>% as.numeric()
+
+naive_test %>% head()
+```
+
+# Normalizing the features
+
+Having a brief look at our dataframe and we notice that the features are on different scales (ie. some features have larger values than others) and this may result in features with larger values over-powering those with smaller values (they might end up having a larger impact on the dependent variable). In order to level out or ensure that each feature contributes proportionally to the dependent variable, the features must be normalized (transformed in such a way that the values are on a similar scale).
+
+$$
+x_{norm} = \frac{x-\bar{x}}{\sqrt{\sigma}}
+$$
+
+# Scaling the training data
+
+```{r}
+
+scale_train = naive_train[,c(1,2,3,4,5,27,28,29)] %>% scale()
+
+scale_train = cbind(scale_train, naive_train[,-c(
+  1,2,3,4,5,27,28,29
+)]) %>% as.data.frame()
+
+scale_train %>% head() # the training data
+
+```
+
+# Scaling the test data
+
+```{r}
+
+scale_test = naive_test[,c(1,2,3,4,5,27,28,29)] %>% scale()
+
+scale_test = cbind(scale_test, naive_test[,-c(
+  1,2,3,4,5,27,28,29
+)]) %>% as.data.frame()
+
+scale_test %>% head() # the test data
+
+```
+
+# Exploratory Data Analysis
+
+In our training sample, what proportion of customers are female?
+
+```{r}
+# In our training sample, what proportion of customers are female
+train %>% select(sex) %>% 
+  summarize(Female = 
+              sum(train$sex=="F")/length(train$sex),
+            Male = 
+              1-sum(train$sex=="F")/length(train$sex))
+
+```
+
+In our training sample, what is the most common martial status type?
+
+```{r}
+# In our training sample, what's most common martial status?
+train %>% select(marital_status) %>% 
+  summarize(D = 
+              sum(train$marital_status=="D")/length(train$sex),
+            f = 
+              sum(train$marital_status=="f")/length(train$sex),
+            M =
+              sum(train$marital_status=="M")/length(train$sex),
+            P =
+              sum(train$marital_status=="P")/length(train$sex),
+            R =
+              sum(train$marital_status=="R")/length(train$sex),
+            S =
+              sum(train$marital_status=="S")/length(train$sex),
+            U =
+              sum(train$marital_status=="U")/length(train$sex),
+            W = 
+              sum(train$marital_status=="W")/length(train$sex)
+            )
+
+```
+
+Given that you're male, how many fall into each martial status type?
+
+```{r}
+train %>% select(sex, marital_status) %>% filter(sex == "M") %>% count(marital_status) %>% ggplot(aes(x = "", y = n, fill = marital_status)) +
+  geom_col(width = 1,color = "black") +
+  coord_polar(theta = "y") +
+  scale_y_discrete(element_blank()) +
+  scale_x_discrete(element_blank()) 
+```
+
+Pie chart may not be clear, here's an alternative view:
+
+```{r}
+train %>% select(sex, marital_status) %>% filter(sex == "M") %>% count(marital_status) 
+```
+
+Given that you're female, how many fall into each of the marital status types?
+
+```{r}
+train %>% select(sex, marital_status) %>% filter(sex == "F") %>% count(marital_status) %>% ggplot(aes(x = "", y = n, fill = marital_status)) +
+  geom_col(width = 1,color = "black") +
+  coord_polar(theta = "y") +
+  scale_y_discrete(element_blank()) +
+  scale_x_discrete(element_blank()) +
+  scale_fill_discrete()
+```
+
+Pie chart may not be clear, here's an alternative view:
+
+```{r}
+train %>% select(sex, marital_status) %>% filter(sex == "F") %>% count(marital_status) 
+```
+
+Given that you're male, what's the most common occupation?
+
+```{r}
+counted_occ = train %>% select(sex, occupation_code) %>% filter(sex == "M") %>% count(occupation_code) 
+
+counted_occ %>% filter(n > 300)%>% ggplot(aes(x = "", y = n, fill = occupation_code)) +
+  geom_col(width = 1,color = "black") +
+  coord_polar(theta = "y") +
+  scale_y_discrete(element_blank()) +
+  scale_x_discrete(element_blank()) 
+```
+
+Given that you're female, what's the most common occupation?
+
+```{r}
+counted_occ = train %>% select(sex, occupation_code) %>% filter(sex == "F") %>% count(occupation_code) 
+
+counted_occ %>% filter(n > 300)%>% ggplot(aes(x = "", y = n, fill = occupation_code)) +
+  geom_col(width = 1,color = "black") +
+  coord_polar(theta = "y") +
+  scale_y_discrete(element_blank()) +
+  scale_x_discrete(element_blank()) +
+  scale_fill_discrete()
+```
+
+Given that you're male, which branch did you sign up at?
+
+```{r}
+counted_branch = train %>% select(sex, branch_code) %>% filter(sex == "M") %>% count(branch_code) 
+
+counted_branch %>% filter(n > 1000)%>% ggplot(aes(x = "", y = n, fill = branch_code)) +
+  geom_col(width = 1,color = "black") +
+  coord_polar(theta = "y") +
+  scale_y_discrete(element_blank()) +
+  scale_x_discrete(element_blank())
+```
+
+An alternative view:
+
+```{r}
+counted_branch %>% select(branch_code, n) %>% filter(n > 1000)
+```
+
+Given that you're female, which branch did you sign up at?
+
+```{r}
+counted_branch_m = train %>% select(sex, branch_code) %>% filter(sex == "F") %>% count(branch_code) 
+
+counted_branch_m %>% filter(n > 1000)%>% ggplot(aes(x = "", y = n, fill = branch_code)) +
+  geom_col(width = 1,color = "black") +
+  coord_polar(theta = "y") +
+  scale_y_discrete(element_blank()) +
+  scale_x_discrete(element_blank()) +
+  scale_fill_hue()
+```
+
+An alternative view:
+
+```{r}
+counted_branch_m %>% select(branch_code, n) %>% filter(n > 1000)
+```
+
+Commonly purchased products by males:
+
+```{r}
+train %>% select(sex, P5DA) %>% filter(sex == "M") %>% count(P5DA) # Repeat for different products
+```
+
+
+|  Product Code   |       Number of purchases     | Proportion of sample size |
+|--------|:-------:|------:|
+| (RVSZ) |    17865|   0.88|
+| (K6Q0) |    15089|   0.74|
+| (QB0L) |     4727|   0.23|
+| (PYUQ) |     1484|   0.07|
+| (JZ9D) |     1429|   0.07|
+
+
+It is worth noting that there are minimal purchases of product 'GYSR' (the least amount of purchases) and purchases of other products is negligible.
+
+Commonly purchased products by females:
+
+```{r}
+train %>% select(sex, P5DA) %>% filter(sex == "F") %>% count(P5DA) # Repeat for different products
+```
+
+
+
+
+|  Product Code   |       Number of purchases     | Proportion of sample size |
+|--------|:------:|------:|
+| (RVSZ) |    7363|   0.85|
+| (K6Q0) |    6540|   0.74|
+| (QB0L) |    2106|   0.24|
+| (PYUQ) |     689|   0.08|
+| (JZ9D) |     585|   0.07|
+
+
+It is worth noting that there are no purchases of product 'GYSR' and purchases of other products is negligible.
+
+What the most common day that clients joined Zimnat?
+
+```{r}
+naive_train %>% select(JoinDay) %>% count(JoinDay) %>% arrange(desc(n)) %>% head(3)
+```
+What the most common month that clients joined Zimnat?
+
+```{r}
+naive_train %>% select(JoinMonth) %>% count(JoinMonth) %>% arrange(desc(n)) %>% head(5)
+```
+
+
+What the most common year that clients joined Zimnat?
+
+```{r}
+naive_train %>% select(JoinYear) %>% count(JoinYear) %>% arrange(desc(n)) %>% head(5)
+```
+
+General takeaways from the EDA:
+
+1. There's a class imbalance (70% of the clients in the sample are male).
+
+2. There are 3 (out of 8 predominant martial status types) predominant martial types: 1) M 2) U 3) S
+
+3. For both genders, they mainly purchase 3 out of the 21 products that Zimnat offer
+
+
+# Training and Validation Sets
+
+A 70/30 split will be used, where 70% will go towards the training set and 30% will go towards the validation set
+
+```{r}
+set.seed(321)
+
+indices = sample(2, nrow(scale_train), replace = T, prob = c(0.7,0.3))
+
+train_scaled = scale_train[indices==1, ]
+
+val_scaled = scale_train[indices==2, ]
+```
+
+Going back to the objective of this project, Zimnat wants to be able to predict which kinds of insurance products to recommend to their customers. In our training sample, we have 21 products therefore for each product we will have to determine the likelihood of a client purchasing it (based on their purchasing behaviour of the other 20 products and other information such as their gender, martial status etc.).
+
+What this will entail is creating a model for each product. Here's a toy example to illustrate this point:
+
+In this toy setting, we have 3 products, a client ID and join date of the client
+
+|       $X_{1}$     | $X_{2}$ |    $X_{3}$   |    $X_{4}$ |
+|:----------:|--------:|--------:|--------:|
+|JoinDate    |Product A|Product B|Product C|
+
+
+Mathematically we'd express the prediction model for each product as follows:
+
+$$
+Product_{A} \sim \beta_{0} + \beta_{1}*X_{1} + \beta_{2}*X_{3} + \beta_{3}*X_{4}
+$$
+
+$$
+Product_B \sim \beta_{0} + \beta_{1}*X_{1} + \beta_{2}*X_{2} + \beta_{3}*X_{4}
+$$
+
+
+$$
+Product_C \sim \beta_{0} + \beta_{1}*X_{1} + \beta_{2}*X_{2} + \beta_{3}*X_{3}
+$$
+
+
+Before we move onto the model building and predictions, it is important to understand that with classification type of problems there are situations where a linear relationship between the target variable and the features exists; and there are situations where the relationship is very complex and non-linear. When building a model, we are uncertain of the true underlying relationship thus we must build several models and evaluate which one is better (based on commonly agreed upon metrics such as MSE or classification error)
+
+We will start with a simple model and gradually increase model complexity to consider models such as decision trees and random forest models.
+
+
+# Logistic Regression
+
+Logistic regression models situations like this: Pr[Product A = 1|Product B = 0, Sex = 1] (the probability that individual i purchases product A, given that they have purchased product B and that they are female).
+
+
+What makes logistic regression different from multiple regression is the range of values that the target variable can take on. In our situation the target variable is a probability which ranges from 0 to 1 (the assumption of the distribution can be a bernoulli distribution); in other situations where the target variable is a real number which ranges from -$\infty$ to $\infty$ (the assumption of the distribution can be a normal distribution). But OLS regression provides a very convenient framework for the estimation of variable coefficients, confidence intervals and hypothesis tests.
+
+Therefore we must somehow transform our target variable that ranges between 0 and 1 and make it range between -$\infty$ and $\infty$:
+
+$$
+log(\frac{P(X)}{P(1-X)})= \beta_{0} + \beta_{1}X
+$$
+
+## GLM for P5DA
+```{r}
+glm_one = glm(P5DA ~ ., data = train_scaled, family = binomial)
+
+summary(glm_one)
+```
+
+
+
+## GLM for RIBP
+```{r}
+glm_two = glm(RIBP ~ ., data = train_scaled, family = binomial)
+
+```
+
+
+## GLM for X8NN1 
+```{r}
+glm_three = glm(X8NN1 ~ ., data = train_scaled, family = binomial)
+
+```
+
+
+## GLM for X7POT 
+```{r}
+glm_four = glm(X7POT ~ ., data = train_scaled, family = binomial)
+
+```
+
+## GLM for X66FJ 
+```{r}
+glm_five = glm(X66FJ ~ ., data = train_scaled, family = binomial)
+
+```
+
+## GLM for GYSR 
+```{r}
+glm_six = glm(GYSR ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+## GLM for SOP4 
+```{r}
+glm_seven = glm(SOP4 ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+## GLM for RVSZ 
+```{r}
+glm_eight = glm(RVSZ ~ ., data = train_scaled, family = binomial)
+
+```
+
+## GLM for PYUQ 
+```{r}
+glm_nine = glm(PYUQ ~ ., data = train_scaled, family = binomial)
+
+```
+
+## GLM for LJR9 
+```{r}
+glm_ten = glm(LJR9 ~ ., data = train_scaled, family = binomial)
+
+```
+
+
+## GLM for N2MW
+```{r}
+glm_eleven = glm(N2MW ~ ., data = train_scaled, family = binomial)
+
+```
+
+## GLM for AHXO 
+```{r}
+glm_twlv = glm(AHXO ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+
+## GLM for BSTQ 
+```{r}
+glm_thrtn = glm(BSTQ ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+
+## GLM for FM3X
+```{r}
+glm_frtn = glm(FM3X ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+
+## GLM for K6QO 
+```{r}
+glm_fftn = glm(K6QO ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+
+## GLM for QBOL 
+```{r}
+glm_sxtn = glm(QBOL ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+## GLM for JWFN 
+```{r}
+glm_svntn = glm(JWFN ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+## GLM for JZ9D 
+```{r}
+glm_egtn = glm(JZ9D ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+## GLM for J9JW 
+```{r}
+glm_nntn = glm(J9JW ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+## GLM for GHYX 
+```{r}
+glm_twty = glm(GHYX ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+## GLM for ECY3 
+```{r}
+glm_twtyo = glm(ECY3 ~ ., data = train_scaled, family = binomial)
+
+
+```
+
+
+## Validating the GLMS
+
+Due to the limitation of my machine's memory, I will only validate the models for the top 5 products (which were displayed above):
+
+### Product one (RVSZ)
+
+Validation classification rate:
+```{r}
+val_one_input = val_scaled[,-16] # creating a dataframe including only the x's
+
+val_one_ouput = val_scaled[,16] # creating a dataframe including only the y
+
+glm_val_one = predict(glm_eight, val_one_input) # using glm to predict y
+
+glm_val_one = ifelse(glm_val_one > 0.5, 1, 0) # converting probs into 0 or 1
+
+mean(glm_val_one == val_one_ouput) # examining the classification rate
+```
+Confusion matrix:
+
+```{r}
+library(e1071)
+library(caret)
+
+glm_one_int_fac = glm_val_one %>% as.factor()
+
+val_one_ouput_fac = val_one_ouput %>% as.factor()
+
+confusionMatrix(glm_one_int_fac, val_one_ouput_fac, positive = '1')
+```
+ROC:
+
+```{r, warning=FALSE,message=FALSE}
+library(pROC)
+
+glm_one_int = glm_val_one %>% as.integer()
+
+roc_rsvz = roc(val_one_ouput, glm_one_int)
+
+plot(roc_rsvz, main = "ROC GLM(RSVZ)")
+```
+The best threshold for RSVZ model:
+
+```{r}
+coords(roc_rsvz, "best", ret = "threshold")
+```
+
+
+AUC:
+```{r}
+auc(roc_rsvz)
+```
+
+
+### Product two (K6Q0)
+
+Validation classification rate:
+```{r}
+val_two_input = val_scaled[,-23] # creating a dataframe including only the x's
+
+val_two_ouput = val_scaled[,23] # creating a dataframe including only the y
+
+glm_val_two = predict(glm_fftn, val_two_input) # using glm to predict y
+
+glm_val_two = ifelse(glm_val_two > 0.5, 1, 0) # converting probs into 0 or 1
+
+mean(glm_val_two == val_two_ouput) # examining the classification rate
+```
+
+
+Confusion matrix:
+
+```{r}
+
+glm_two_int_fac = glm_val_two %>% as.factor()
+
+val_two_ouput_fac = val_two_ouput %>% as.factor()
+
+confusionMatrix(glm_two_int_fac, val_two_ouput_fac, positive = '1')
+```
+
+
+ROC:
+
+```{r, warning=FALSE,message=FALSE}
+
+glm_two_int = glm_val_two %>% as.integer()
+
+roc_k6q0 = roc(val_two_ouput, glm_two_int)
+
+plot(roc_k6q0, main = "ROC GLM(K6Q0)")
+```
+
+
+
+
+The best threshold for K6Q0 model:
+
+```{r}
+coords(roc_k6q0, "best", ret = "threshold")
+```
+
+AUC:
+
+```{r}
+auc(roc_k6q0)
+```
+
+
+### Product three (QBOL)
+
+Validation classification rate:
+```{r}
+val_three_input = val_scaled[,-24] # creating a dataframe including only the x's
+
+val_three_ouput = val_scaled[,24] # creating a dataframe including only the y
+
+glm_val_three = predict(glm_sxtn, val_three_input) # using glm to predict y
+
+glm_val_three = ifelse(glm_val_three > 0.5, 1, 0) # converting probs into 0 or 1
+
+mean(glm_val_three == val_three_ouput) # examining the classification rate
+```
+
+
+Confusion matrix:
+
+```{r}
+
+glm_three_int_fac = glm_val_three %>% as.factor()
+
+val_three_ouput_fac = val_three_ouput %>% as.factor()
+
+confusionMatrix(glm_three_int_fac, val_three_ouput_fac, positive = '1')
+```
+
+
+ROC:
+
+```{r, warning=FALSE,message=FALSE}
+
+glm_three_int = glm_val_three %>% as.integer()
+
+roc_qbol = roc(val_three_ouput, glm_three_int)
+
+plot(roc_qbol, main = "ROC GLM(QB0L)")
+```
+
+
+
+
+The best threshold for QB0L model:
+
+```{r}
+coords(roc_qbol, "best", ret = "threshold")
+```
+
+AUC:
+
+```{r}
+auc(roc_qbol)
+```
+
+### Product four (PYUQ)
+
+Validation classification rate:
+```{r}
+val_four_input = val_scaled[,-17] # creating a dataframe including only the x's
+
+val_four_ouput = val_scaled[,17] # creating a dataframe including only the y
+
+glm_val_four = predict(glm_nine, val_four_input) # using glm to predict y
+
+glm_val_four = ifelse(glm_val_four > 0.5, 1, 0) # converting probs into 0 or 1
+
+mean(glm_val_four == val_four_ouput) # examining the classification rate
+```
+
+
+Confusion matrix:
+
+```{r}
+
+glm_four_int_fac = glm_val_four %>% as.factor()
+
+val_four_ouput_fac = val_four_ouput %>% as.factor()
+
+confusionMatrix(glm_four_int_fac, val_four_ouput_fac, positive = '1')
+```
+
+
+ROC:
+
+```{r, warning=FALSE,message=FALSE}
+
+glm_four_int = glm_val_four %>% as.integer()
+
+roc_pyuq = roc(val_four_ouput, glm_four_int)
+
+plot(roc_pyuq, main = "ROC GLM(PYUQ)")
+```
+
+
+
+
+The best threshold for K6Q0 model:
+
+```{r}
+coords(roc_pyuq, "best", ret = "threshold")
+```
+
+AUC:
+
+```{r}
+auc(roc_pyuq)
+```
+
+
+
+```{r saving data in workspace}
+#save.image(file = "~/Docu/Zindi challenges/Zimnat Insurance/data/ModelBuild.RData")
+```
+
+
+After considering the top 4 products, we start to notice that the marginal benefit of using a GLM to predict the purchase of a product begins to dwindle. This means that with other products that were purchased less frequently, we might as well just assign a label of 0 because there aren't many instances in the data where we see a label of 1. Although if Zimnat wanted a better sensitivity measure (to be able to better predict who will buy less frequently purchased products, maybe this is some niche market, then we'd apply random-over-sampling in order to better teach the GLM to better detect instances where less frequently products are purchased). 
+
+
+# Fitting the relevant models on the full training data
+
+The relevant insurance products are:
+
+1. RVSZ
+
+2. K6Q0
+
+3. QB0L
+
+4. PYUQ
+
+Then for the rest of the products we would just assign the label 0 (because in the training data there's a class imbalance and the rest of the products are barely purchased). 
